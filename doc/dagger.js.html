@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: dagger.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: dagger.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>(function (root, factory) {
+
+  // UMD
+  if (typeof define === 'function' &amp;&amp; define.amd) {
+    define([], factory);
+  } else if (typeof exports === 'object') {
+    module.exports = factory();
+  } else {
+    root.Dagger = factory();
+  }
+
+}(this, function () {
+
+  /**
+   * @typedef Dagger
+   */
+
+  /**
+   * A Directed Acyclic Graph Implementation
+   * by yours truly
+   * @access public
+   * @module Dagger
+   *
+   * @param {Object} opts Options for configuring the DAG.
+   * @param {String} opts.uniqueKey Unique key
+   * @param {String} opts.descriptionKey Description key
+   * @param {Boolean} [opts.checkCycles=false] Flag indicating whether we should check for cycles. Set to &lt;code>true&lt;/code> to check for cycles.
+   * @param {Boolean} [opts.debug=false] Flag indicating we're running in debug mode. Set to &lt;code>true&lt;/code> to enable debug mode.
+   *
+   * @return {Dagger} A directed acyclic graph.
+   */
+  const Dagger = function (opts) {
+
+    /**
+     * set defaults
+     */
+    let key   = opts.uniqueKey || "id";
+    let dKey  = opts.descriptionKey || "text";
+    let debug = opts.debug === true;
+
+    /**
+     * should #addEdge check for cycles and error if found?
+     */
+    let checkCycles = opts.checkCycles === true;
+
+    /**
+     * node to set&lt;node> parent mapping
+     * @access private
+     */
+    let parents = {};
+
+    /**
+     * node to set&lt;node> children mapping
+     */
+    let children = {};
+
+    /**
+     * uniqueKey to node mapping
+     */
+    let nodes = {};
+
+    /**
+     * the root node
+     */
+    let root = null;
+
+    /**
+     * @typedef Node
+     */
+
+    /**
+     * A node in the graph
+     * @class Node
+     *
+     * @param {Object} data The data held by the &lt;code>Node&lt;/code>.
+     * @return {Node} A node in the DAG.
+     */
+    let Node = function (data) {
+
+      /**
+       * Information stored in the node.
+       * Should contain key of name &lt;code>opts.uniqueKey&lt;/code>.
+       * @access private
+       */
+      this.data = data;
+
+      /**
+       * Get all parents of this &lt;code>Node&lt;/code>.
+       * @access public
+       * @function parents
+       * @return {Array} List of all parents of this &lt;code>Node&lt;/code>.
+       */
+      this.parents = function () {
+        return parents[this.data[key]];
+      };
+
+      /**
+       * Get all children of this &lt;code>Node&lt;/code>.
+       * @access public
+       * @function children
+       * @return {Array} List of all children of this &lt;code>Node&lt;/code>.
+       */
+      this.children = function () {
+        return children[this.data[key]];
+      };
+
+      /**
+       * Check if node data matches query.
+       * @access public
+       * @function matches
+       * @param {Object} query Data to query.
+       * @return {Boolean} &lt;code>true&lt;/code> if there is a match, &lt;code>false&lt;/code> otherwise.
+       */
+      this.matches = function (query) {
+
+        if (!query || Object.keys(query).length === 0) {
+          return false;
+        }
+
+        for (let k in query) {
+          if (!query.hasOwnProperty(k)) {
+            continue;
+          }
+
+          if (query[k] !== this.data[k]) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+
+      /**
+       * Quick equals method, compare two nodes.
+       * @access public
+       * @function equals
+       * @param {Node} anotherNode &lt;code>Node&lt;/code> to compare against.
+       * @return {Boolean} &lt;code>true&lt;/code> if the &lt;code>Node&lt;/code>s match, &lt;code>false&lt;/code> otherwise.
+       */
+      this.equals = function (anotherNode) {
+        return this.matches(anotherNode.data);
+      }
+
+      /**
+       * Helper function for iterating through each child.
+       * @access private
+       * @function childrenEach
+       * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+       * @return {Array} Array of all visited &lt;code>Node&lt;/code>s.
+       */
+      this.childrenEach = function (onVisit) {
+        return this._eachNode(this.children(), onVisit);
+      }
+
+      /**
+       * Helper function for iterating through each parent.
+       * @access private
+       * @function parentsEach
+       * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+       * @return {Array} Array of all visited &lt;code>Node&lt;/code>s.
+       */
+      this.parentsEach = function (onVisit) {
+        return this._eachNode(this.parents(), onVisit);
+      }
+
+      /**
+       * iterate through a collection of objects, applying onVisit to each element
+       * @access private
+       * @function _eachNode
+       * @param {Array} collection Array of &lt;code>Node&lt;/code>s to iterate.
+       * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+       * @return {void}
+       */
+      this._eachNode = function (collection, onVisit) {
+
+        if (collection) {
+          for (let i = 0; i &lt; collection.length; i++) {
+            onVisit(nodes[collection[i]]);
+          }
+        }
+      }
+
+      /**
+       * Remove self from graph explosively.
+       * @access public
+       * @function removeFromGraph
+       * @return {void}
+       */
+      this.removeFromGraph = function () {
+
+        let self = this;
+
+        this.childrenEach(function (child) {
+          let myParentIndex = parents[child.data.key].indexOf(self.data[key]);
+          delete parents[child][myParentIndex];
+        });
+
+        this.parentsEach(function (parent) {
+          let myChildIndex = children[parent.data.key].indexOf(self.data[key]);
+          delete children[parent][myChildIndex];
+        });
+
+        delete parents[this.data[key]];
+        delete children[this.data[key]];
+        delete nodes[this.data[key]];
+
+      };
+    };
+
+    /**
+     * Get all &lt;code>Node&lt;/code>s.
+     * @access public
+     * @function nodes
+     * @return {Array} Array of all nodes in the graph.
+     */
+    this.nodes = function () {
+      return nodes;
+    };
+
+    /**
+     * Wrap data in a node and add it to nodes object.
+     * @param {Object} data Data to add to the vertex.
+     * @return {void}
+     */
+    this.addVertex = function (data) {
+      if (data[key] &amp;&amp; !nodes[data[key]]) {
+        nodes[data[key]] = new Node(data);
+      }
+    };
+
+    /**
+     * Add an edge between parent and child
+     * @param {Object} parent Parent node.
+     * @param {Object} child Child node.
+     * @return {Dagger} The DAG for chaining.
+     */
+    this.addEdge = function (parent, child) {
+
+      if (!parent || !child) {
+        return this;
+      }
+      this.checkCycles(parent, child);
+
+      let rootNode  = nodes[root];
+      let childNode = nodes[child[key]];
+
+      let query  = {};
+      query[key] = root;
+
+      if (!rootNode || (childNode &amp;&amp; childNode.matches(query))) {
+        root = parent[key];
+        this.addVertex(root);
+        this.log('added new root node "' + root + '"');
+      }
+
+      let childrenOfParent = children[parent[key]] || [];
+      let parentsOfChild   = parents[child[key]] || [];
+
+      childrenOfParent.push(child[key]);
+      parentsOfChild.push(parent[key]);
+
+      children[parent[key]] = childrenOfParent;
+      parents[child[key]]   = parentsOfChild;
+
+      this.addVertex(parent);
+      this.addVertex(child);
+
+      return this;
+    };
+
+    /**
+     * Find the edge between two verticies (returning full path)
+     * @param {Object} v1 First vertex.
+     * @param {Object} v2 Second vertex.
+     * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+     * @return {Array} Path from &lt;code>v1&lt;/code> to &lt;code>v2&lt;/code>.
+     */
+    this.findEdge = function (v1, v2, onVisit) {
+      return this._findEdge(nodes[v1[key]], nodes[v2[key]], [], onVisit);
+    }
+
+    /**
+     * Find the edge between two verticies.
+     * @access private
+     * @function _findEdge
+     * @param {Object} v1 First vertex.
+     * @param {Object} v2 Second vertex.
+     * @param {Array} edge The edge to find.
+     * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+     * @return {Array} Edge in graph
+     */
+     this._findEdge = function (v1, v2, edge, onVisit) {
+
+       let query = {}
+         , self  = this;
+
+       query[key] = v2.data[key];
+
+       let match = this.dfs({ start: v1, q: query });
+
+       if (match) {
+         if (onVisit &amp;&amp; typeof onVisit === 'function') {
+           edge.push(onVisit(v1.data));
+         } else {
+           edge.push(v1.data);
+         }
+       }
+
+       v1.childrenEach(function (child) {
+         self._findEdge(child, v2, edge, onVisit);
+       });
+
+       return edge;
+     }
+
+    /**
+     * Check for cycles in the graph and throw an exception if found.
+     * @access private
+     * @function checkCycles
+     * @throws Will throw an exception if there is a cycle.
+     *
+     * @param {Node} parent The parent node.
+     * @param {Node} child The child node.
+     * @return {void}
+     */
+    this.checkCycles = function (parent, child) {
+
+      if (!checkCycles) {
+        return;
+      }
+
+      if (nodes[parent[key]] &amp;&amp; nodes[child[key]]) {
+
+        let edge = this.findEdge(child, parent);
+        if (edge.length > 1) {
+
+          let ex = 'adding edge would create cycle in the graph: "'
+            + parent[key]
+            + '" -> "'
+            + child[key]
+            + '"';
+
+          throw ex;
+        }
+      }
+    }
+
+    /**
+     * Remove an edge between parent and child, connects child to parent's parents
+     * @access public
+     * @function removeEdge
+     * @param {Object} parent Parent node.
+     * @param {Object} child Child node.
+     * @return {void}
+     */
+    this.removeEdge = function (parent, child) {
+
+      if (!parent || !child) {
+        return;
+      }
+
+      let childrenOfParent = children[parent[key]];
+      let parentsOfChild   = parents[child[key]];
+
+      if (!childrenOfParent || !parentsOfChild) {
+        this.log('attempting to remove an edge that does not exist');
+        return;
+      }
+
+      let childIndex  = childrenOfParent.indexOf(child[key]);
+      let parentIndex = parentsOfChild.indexOf(parent[key]);
+
+      let parentsOfParent = parents[parent[key]];
+
+      if (parentsOfParent) {
+        for (let i = 0; i &lt; parentsOfParent.length; i++) {
+          this.addEdge(nodes[parentsOfParent[i]].data, nodes[child[key]].data);
+        }
+      }
+
+      delete childrenOfParent[childIndex];
+      delete parentsOfChild[parentIndex];
+
+      children[parent[key]] = childrenOfParent;
+      parents[child[key]]   = parentsOfChild;
+
+      this.log('removed edge between "'
+        + parent[key]
+        + '" and "'
+        + child[key]
+        + '"');
+    };
+
+    /**
+     * Remove a vertex from the graph, connecting children of v to parents
+     * @access public
+     * @function removeVertex
+     *
+     * @param {Object} v Vertex to remove
+     * @return {void}
+     */
+    this.removeVertex = function (v) {
+
+      let node = nodes[v[key]];
+      if (node) {
+
+        let parentsOfVertex  = parents[v[key]];
+        let childrenOfVertex = children[v[key]];
+
+        node.removeFromGraph();
+
+        if (parentsOfVertex &amp;&amp; childrenOfVertex) {
+          for (let i = 0; i &lt; parentsOfVertex.length; i++) {
+            for (let j = 0; j &lt; childrenOfVertex.length; j++) {
+
+              this.log('adding edge between "'
+                + parentsOfVertex[i] + '" and "' + childrenOfVertex[j] + '"');
+              this.addEdge(nodes[parentsOfVertex[i]].data, nodes[childrenOfVertex[j]].data);
+
+            }
+          }
+        }
+
+        this.log('removed vertex "' + v[key] + '"');
+
+      } else {
+        this.log('attempted to remove vertex that does not exist');
+      }
+    }
+
+    /**
+     * Public depth-first search (overloaded #_dfs)
+     * @access public
+     * @function dfs
+     *
+     * @param {Object} params Search parameters.
+     * @param {Node} params.start Node to start the search at.
+     * @param {Object} params.q Key-value pairs to match on
+     * @param {String} params.direction Direction to search, 'up' or 'down'.
+     * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+     *
+     * @return {Object} match if query given
+     */
+    this.dfs = function (params, onVisit) {
+
+      if (!params || Object.keys(params).length === 0) {
+        params = { start: nodes[root] }
+      }
+
+      return this._dfs(params, 0, onVisit);
+    }
+
+    /**
+     * A recursive depth-first search implementation.
+     * @access public
+     * @function _dfs
+     *
+     * @param {Object} params Search parameters.
+     * @param {Node} params.start starting node
+     * @param {Object} params.query key-value pairs to match on
+     * @param {String} params.direction up or down
+     * @param {Number} depth depth of search
+     * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+     *
+     * @return {Object} match if query given
+     */
+    this._dfs = function (params, depth, onVisit) {
+
+      if (params.start === undefined) {
+        return;
+      }
+
+      let node  = params.start
+        , query = params.q
+        , hasQuery  = query &amp;&amp; Object.keys(query).length > 0
+        , direction = params.direction;
+
+      if (onVisit &amp;&amp; typeof onVisit === "function") {
+        onVisit(node, depth);
+      }
+
+      if (hasQuery &amp;&amp; node.matches(query)) {
+
+        return node.data;
+
+      } else {
+
+        let items = direction === 'up'
+          ? node.parents()
+          : node.children();
+
+        if (items) {
+
+          for (let i = 0; i &lt; items.length; i++) {
+
+            let recParams = {
+              start: nodes[items[i]],
+              q: query,
+              direction: direction
+            };
+
+            let match = this._dfs(recParams, depth + 1, onVisit);
+
+            if (hasQuery &amp;&amp; match) {
+              return match;
+            }
+          }
+        }
+      }
+    };
+
+    /**
+     * Do a depth-first search starting at v, moving in given direction
+     * @access private
+     * @function _relativesOf
+     *
+     * @param {Object} v Vertex to start at,
+     * @param {String} direction Direction to search. 'up' or 'down'.
+     * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+     * @return {Array} relatives
+     */
+    this._relativesOf = function (v, direction, onVisit) {
+
+      let node = nodes[v[key]];
+      let relatives = []
+        , dfsParams = {
+          direction: direction,
+          start: node
+        };
+
+      this.dfs(dfsParams, function (relative) {
+        if (!relative.equals(node)) {
+          if (onVisit &amp;&amp; typeof onVisit === "function") {
+            relatives.push(onVisit(relative.data));
+          } else {
+            relatives.push(relative.data);
+          }
+        }
+      });
+
+      return relatives;
+    }
+
+    /**
+     * Get all descendants of a vertex.
+     * @access public
+     * @function descendantsOf
+     *
+     * @param {Object} v Vertex to find descendents of.
+     * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+     * @return {Array} Descendants.
+     */
+    this.descendantsOf = function (v, onVisit) {
+      return this._relativesOf(v, 'down', onVisit);
+    };
+
+    /**
+     * Get all ancestors of a vertex.
+     * @access public
+     * @function ancestorsOf
+     *
+     * @param {Object} v Vertext to find ancestors of.
+     * @param {Function} onVisit Iterator function that is called on each &lt;code>Node&lt;/code> as it is visited.
+     * @return {Array} Ancestors.
+     */
+    this.ancestorsOf = function (v, onVisit) {
+      return this._relativesOf(v, 'up', onVisit);
+    };
+
+    /**
+     * Get a simple text representation of the graph.
+     * @access public
+     * @function toString
+     *
+     * @return {String} String representation of the DAG.
+     */
+    this.toString = function () {
+
+      let str = "";
+
+      this.dfs({}, function (node, depth) {
+
+        if (node === undefined) {
+          return "";
+        }
+
+        for (let i = 0; i &lt; depth + 1; i++) {
+          str += "-";
+        }
+
+        str += " ";
+        str += node.data[key]
+        str += " ("
+        str += node.data[dKey]
+        str += ")"
+        str += "\n";
+
+      });
+
+      return str;
+    };
+
+    /**
+     * Only console log if we're in debug.
+     * @access private
+     * @function log
+     *
+     * @param {String} message Message to print.
+     * @param {Object} obj JSON object to print.
+     * @return {void}
+     */
+    this.log = function (message, obj) {
+
+      if (debug === true) {
+        if (obj) {
+          message += " " + JSON.stringify(obj, null, 2);
+        }
+
+        console.log("[INFO] " + message);
+      }
+    }
+  };
+
+  return Dagger;
+
+}));
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-Dagger.html">Dagger</a></li></ul><h3>Classes</h3><ul><li><a href="module-Dagger.html#~Node">Node</a></li></ul><h3><a href="global.html">Global</a></h3>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.4.0</a> on Thu Mar 31 2016 09:30:20 GMT-0700 (PDT)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
